@@ -1,0 +1,5 @@
+conf.py
+venv/
+# MacOS
+.DS_Store
+chat.openai.com.har
