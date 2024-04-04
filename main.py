@@ -1,4 +1,7 @@
+import sys
 import logging
+from loguru import logger
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 import os
@@ -13,21 +16,26 @@ nest_asyncio.apply()
 import pytgpt.phind as phind
 from pytgpt.imager import Imager
 
+# Удалить обработчик по умолчанию и добавить новый обработчик с форматированием
+logger.remove()
+logger.add(sys.stdout, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level}</level> | <cyan>{message}</cyan>")
+log_img = "IMG  | "
+log_gpt = "GPT  | "
+log_main = "MAIN | "
+
 # Включите логирование
 logging.basicConfig(level=logging.INFO)
 logging.getLogger('seleniumwire').setLevel(logging.ERROR)
 logging.getLogger('undetected_chromedriver').setLevel(logging.ERROR)
+
 # Инициализация бота
-API_TOKEN = conf.API_TOKEN
+API_TOKEN = conf.API_TOKEN_TEST
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
-conversation_dict = {}
-
-
-
 
 # Словарь для хранения истории разговоров
 conversation_history = {}
+conversation_dict = {}
 
 # Функция для обрезки истории разговора
 def trim_history(history, max_length=4096):
@@ -46,7 +54,7 @@ async def process_clear_command(message: types.Message):
     logging.info(f"{user_id} reset contest [clear]")
 
 @dp.message_handler(commands=['img'])
-async def image_generate(message: types.Message):
+async def img_generate(message: types.Message):
     user_id = message.from_user.id
     # Разделяем текст сообщения на части по пробелам
     command_parts = message.text.split()
@@ -56,7 +64,7 @@ async def image_generate(message: types.Message):
         user_input = ' '.join(message.text.split()[1:])
         try:
             img_ai = Imager()
-            logging.info(f"[IMG_GENERATE] {user_id} image prompt: {user_input}")
+            logger.info(f"{log_img}User: {user_id}, prompt: {user_input}")
             generated_images = img_ai.generate(prompt=user_input, amount=2, stream=True)
             await message.answer("Генерация двух изображений по вашему запросу...")
             # Отправляем каждое изображение по отдельности
@@ -69,19 +77,19 @@ async def image_generate(message: types.Message):
                 # Отправляем изображение из файла
                 with open(img_path, 'rb') as img_file:
                     await message.reply_photo(img_file)
-                    logging.info(f"[IMG_GENERATE] {user_id} received an image")
+                    logger.info(f"{log_img}User: {user_id}, respon: {img_file.name}")
                 
                 # Удаляем временный файл
                 os.remove(img_path)
                 
         except Exception as e:
             await message.reply(f"Произошла ошибка при отправке изображения, попробуйте еще раз.")
-            logging.error(f"[IMG_GENERATE] {e}")
+            logger.error(f"{log_img}User: {user_id}, error: {e}")
     else:
         await message.reply("Вы не указали тему для поиска фотографий. Пожалуйста, укажите тему после команды /img")
 
 @dp.message_handler(commands=['gpt'])
-async def send_welcome(message: types.Message):
+async def prompt_generate_gpt(message: types.Message):
     user_id = message.from_user.id
     command_parts = message.text.split()
 
@@ -96,9 +104,9 @@ async def send_welcome(message: types.Message):
         conversation_history[user_id] = trim_history(conversation_history[user_id])
 
         chat_history = conversation_history[user_id]
-        sent_message = await message.answer("Ваш запрос обрабатывается...")
+        sent_message = await message.answer(conf.PROMPT_PROCESSING)
         message_id = sent_message.message_id
-        logging.info(f"[GPT_CHAT] {user_id} text prompt: {chat_history}")
+        logger.info(f"{log_gpt}User: {user_id}, prompt: {user_input}")
         try:
             client = Client()
             
@@ -112,15 +120,15 @@ async def send_welcome(message: types.Message):
             conversation_history[user_id].append({"role": "assistant", "content": chat_gpt_response})
             
             await bot.edit_message_text(chat_gpt_response, message_id=message_id, chat_id=message.chat.id, parse_mode='Markdown')
-            logging.info(f"[GPT_CHAT] {user_id} received a response: {chat_gpt_response}")
+            logger.info(f"{log_gpt}User: {user_id}, respon: {chat_gpt_response}")
         except Exception as e:
             await bot.edit_message_text("Произошла ошибка", message_id=message_id, chat_id=message.chat.id, parse_mode='Markdown')
-            logging.error(f"[GPT_CHAT] {e}")
+            logger.error(f"{log_gpt}User: {user_id}, error: {e}")
     else:
         await message.reply("Вы не указали свой запрос. Пожалуйста, укажите запрос после команды /gpt4")
 
 @dp.message_handler()
-async def prompt_generate(message: types.Message):
+async def prompt_generate_main(message: types.Message):
     user_id = message.from_user.id
     user_input = message.text
     
@@ -130,19 +138,17 @@ async def prompt_generate(message: types.Message):
         conversation = Conversation()
         conversation_dict[user_id] = conversation
     
-    sent_message = await message.answer("Ваш запрос обрабатывается...")
+    sent_message = await message.answer(conf.PROMPT_PROCESSING)
     message_id = sent_message.message_id
-    logging.info(f"[SIMPLE_CHAT] {user_id} text prompt: {message.text}")
+    logger.info(f"{log_main}User: {user_id}, prompt: {message.text}")
     try:
-        bot_ai = phind.PHIND(conversation)
-        
+        bot_ai = phind.PHIND(conversation)        
         response = bot_ai.chat(user_input)
-        logging.info(f"[SIMPLE_CHAT] {conversation.gen_complete_prompt(user_input)}")
         await bot.edit_message_text(response, message_id=message_id, chat_id=message.chat.id, parse_mode='Markdown')
-        logging.info(f"[SIMPLE_CHAT] {user_id} received a response: {response}")
+        logger.info(f"{log_main}User: {user_id}, respon: {response}")
     except Exception as e:
         await bot.edit_message_text("Произошла ошибка", message_id=message_id, chat_id=message.chat.id, parse_mode='Markdown')
-        logging.error(f"[SIMPLE_CHAT] {e}")
+        logger.error(f"{log_main}User: {user_id}, error: {e}")
 
 # Запуск бота
 if __name__ == '__main__':
